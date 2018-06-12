@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Simple OpenSSL Certificate Authority
-# Author: Karl McGuinness
-# Version: 0.2
+# Original Author: Karl McGuinness
+# Converted to Elliptic Curve cryptography for DTLS 1.2 by https://github.com/bu5hm4nn
+# Version: 0.3
 
 # Load environment variables
 vars=$(cat .env | grep -v "#" | xargs)
 eval export $vars
-
 
 # If these paths change, CONFIG_FILE must be updated
 CONFIG_FILE=$PWD/ca_openssl.cfg
@@ -121,11 +121,13 @@ create_ca() {
 
     echo "Generating self-signed root certificate..."
     echo
-    openssl req -config "$CONFIG_FILE" -new -x509 -extensions ca_extensions -days 5000 -keyout "$private_key" -out "$cert_pem"
+    openssl ecparam -name secp256r1 -genkey -noout -out "$private_key"
     if [ ! -e "$private_key" ]; then
       echo "Error occurred generating private key $private_key!" >&2
       exit 1
     fi
+
+    openssl req -config "$CONFIG_FILE" -new -x509 -extensions ca_extensions -days 5000 -key "$private_key" -out "$cert_pem"   
     if [ ! -e "$cert_pem" ]; then
       echo "Error occurred generating certificate $cert_pem!" >&2
       exit 1
@@ -155,11 +157,13 @@ create_ca() {
 
     echo "Generating certificate signing request for new certificate authority..."
     echo
-    openssl req -config "$CONFIG_FILE" -new -keyout "$private_key" -out "$csr"
+    openssl ecparam -name secp256r1 -genkey -noout -out "$private_key"
     if [ ! -e "$private_key" ]; then
       echo "Error occurred generating private key $private_key!" >&2
       exit 1
     fi
+
+    openssl req -config "$CONFIG_FILE" -new -sha256 -key "$private_key" -out "$csr"
     if [ ! -e "$csr" ]; then
       echo "Error occurred generating certificate signing request $csr!" >&2
       exit 1
@@ -395,18 +399,22 @@ create_cert() {
   local cert_pfx=$PRIVATE_KEY_STORE/${cert_name}.pfx
   local csr=$CSR_STORE/${cert_name}.csr
 
-  openssl req -config "$CONFIG_FILE" -new -keyout "$private_key" -out "$csr"
+  # Create an CoAP spec compatible key file
+  openssl ecparam -name secp256r1 -genkey -noout -out "$private_key"
   if [ ! -e "$private_key" ]; then
     echo "Error occurred generating private key $private_key!" >&2
     exit 1
   fi
+
+  # Create a signing request
+  openssl req -config "$CONFIG_FILE" -new -sha256 -key "$private_key" -out "$csr"
   if [ ! -e "$csr" ]; then
     echo "Error occurred generating certificate signing request $csr!" >&2
     exit 1
   fi
   echo
   echo "Signing certificate request.."
-  openssl ca -config "$CONFIG_FILE" -name "$AUTHORITY_SECTION_NAME" -policy "$POLICY_SECTION_NAME" -extensions "$template_extension" -in "$csr" -out "$cert_pem"
+  openssl ca -notext -config "$CONFIG_FILE" -name "$AUTHORITY_SECTION_NAME" -policy "$POLICY_SECTION_NAME" -extensions "$template_extension" -in "$csr" -out "$cert_pem"
   rm "$csr"
   if [ ! -e "$cert_pem" ]; then
     echo "Error occurred signing certificate $csr!" >&2
